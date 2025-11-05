@@ -4,6 +4,7 @@ const SUMMARY_SHEET_NAME = 'MonthlySummary';
 const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 const SPREADSHEET_ID = SCRIPT_PROPERTIES.getProperty('SPREADSHEET_ID');
 const CHANNEL_ACCESS_TOKEN = SCRIPT_PROPERTIES.getProperty('LINE_ACCESS_TOKEN');
+const CHANNEL_SECRET = SCRIPT_PROPERTIES.getProperty('LINE_CHANNEL_SECRET');
 const CACHE = CacheService.getScriptCache();
 
 /**
@@ -24,6 +25,11 @@ function doPost(e) {
   } catch (error) {
     Logger.log('Failed to parse payload: ' + error);
     return createResponse_(400, 'Bad request');
+  }
+
+  const signature = e.headers && (e.headers['X-Line-Signature'] || e.headers['x-line-signature']);
+  if (!isValidSignature_(signature, e.postData.contents)) {
+    return createResponse_(403, 'Forbidden');
   }
 
   if (!payload.events || !payload.events.length) {
@@ -125,35 +131,64 @@ function getSummarySheet_() {
  * @param {string} displayName User display name.
  */
 function incrementMessageCount_(sheet, monthKey, userId, displayName) {
-  const lastColumn = sheet.getLastColumn();
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
 
-  let monthColumnIndex = headers.indexOf(monthKey) + 1;
-  if (monthColumnIndex === 0) {
-    monthColumnIndex = lastColumn + 1;
-    sheet.getRange(1, monthColumnIndex).setValue(monthKey);
-  }
+  try {
+    const lastColumn = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
 
-  const userIds = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
-  let rowIndex = -1;
-  for (var i = 0; i < userIds.length; i++) {
-    if (userIds[i][0] === userId) {
-      rowIndex = i + 2;
-      break;
+    let monthColumnIndex = headers.indexOf(monthKey) + 1;
+    if (monthColumnIndex === 0) {
+      monthColumnIndex = lastColumn + 1;
+      sheet.getRange(1, monthColumnIndex).setValue(monthKey);
     }
+
+    const userIds = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
+    let rowIndex = -1;
+    for (var i = 0; i < userIds.length; i++) {
+      if (userIds[i][0] === userId) {
+        rowIndex = i + 2;
+        break;
+      }
+    }
+
+    if (rowIndex === -1) {
+      rowIndex = sheet.getLastRow() + 1;
+      sheet.getRange(rowIndex, 1).setValue(userId);
+      sheet.getRange(rowIndex, 2).setValue(displayName);
+    } else if (displayName && sheet.getRange(rowIndex, 2).getValue() !== displayName) {
+      sheet.getRange(rowIndex, 2).setValue(displayName);
+    }
+
+    const cell = sheet.getRange(rowIndex, monthColumnIndex);
+    const currentValue = Number(cell.getValue()) || 0;
+    cell.setValue(currentValue + 1);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Validates the LINE webhook signature using the channel secret.
+ *
+ * @param {string} signature The X-Line-Signature header value.
+ * @param {string} payload Raw request body.
+ * @return {boolean}
+ */
+function isValidSignature_(signature, payload) {
+  if (!CHANNEL_SECRET) {
+    Logger.log('LINE channel secret is not configured; skipping signature validation.');
+    return true;
   }
 
-  if (rowIndex === -1) {
-    rowIndex = sheet.getLastRow() + 1;
-    sheet.getRange(rowIndex, 1).setValue(userId);
-    sheet.getRange(rowIndex, 2).setValue(displayName);
-  } else if (displayName && sheet.getRange(rowIndex, 2).getValue() !== displayName) {
-    sheet.getRange(rowIndex, 2).setValue(displayName);
+  if (!signature) {
+    Logger.log('Missing X-Line-Signature header.');
+    return false;
   }
 
-  const cell = sheet.getRange(rowIndex, monthColumnIndex);
-  const currentValue = Number(cell.getValue()) || 0;
-  cell.setValue(currentValue + 1);
+  const expectedSignature = Utilities.base64Encode(Utilities.computeHmacSha256Signature(payload, CHANNEL_SECRET));
+  return signature === expectedSignature;
 }
 
 /**
