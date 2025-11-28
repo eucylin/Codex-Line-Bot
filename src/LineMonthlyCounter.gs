@@ -66,12 +66,18 @@ function doPost(e) {
       return;
     }
 
+    const message = event.message;
+
+    // Only count text messages, skip stickers, images, etc.
+    if (!message || message.type !== 'text') {
+      return;
+    }
+
     const timestamp = new Date(event.timestamp);
     const monthKey = Utilities.formatDate(timestamp, TIMEZONE, 'yyyy-MM');
     const groupName = getGroupName_(groupId);
     const displayName = getDisplayName_(groupId, userId);
-    const message = event.message;
-    const monthCommand = message && message.type === 'text' ? extractMonthCommand_(message.text, event.timestamp) : null;
+    const monthCommand = extractMonthCommand_(message.text, event.timestamp);
 
     incrementMessageCount_(sheet, monthKey, userId, displayName, {
       groupId: groupId,
