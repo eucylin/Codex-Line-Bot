@@ -75,12 +75,13 @@ function doPost(e) {
 
     const timestamp = new Date(event.timestamp);
     const monthKey = Utilities.formatDate(timestamp, TIMEZONE, 'yyyy-MM');
-    
-    // 使用平行化 API 呼叫同時取得 groupName 和 displayName
-    const names = fetchNamesInParallel_(groupId, userId);
-    const groupName = names.groupName;
-    const displayName = names.displayName;
     const monthCommand = extractMonthCommand_(message.text, event.timestamp);
+    
+    // 先取得 groupName（用於找到正確的 sheet）
+    const groupName = getGroupName_(groupId);
+
+    // 智慧取得 displayName：先查 Sheet，沒有才呼叫 API
+    const displayName = getDisplayNameSmart_(spreadsheet, groupId, groupName, monthKey, userId);
 
     incrementMessageCount_(sheet, monthKey, userId, displayName, {
       groupId: groupId,
@@ -262,6 +263,52 @@ function fetchNamesInParallel_(groupId, userId) {
   }
   
   return { groupName: groupName, displayName: displayName };
+}
+
+/**
+ * Smart display name fetcher: checks Sheet first, only calls API for new users.
+ * This avoids unnecessary API calls for users we already know.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet
+ * @param {string} groupId LINE group ID.
+ * @param {string} groupName Group name (for finding the sheet).
+ * @param {string} monthKey yyyy-MM format.
+ * @param {string} userId LINE user ID.
+ * @return {string} Display name or userId as fallback.
+ */
+function getDisplayNameSmart_(spreadsheet, groupId, groupName, monthKey, userId) {
+  // 1. 先檢查 Cache
+  const cacheKey = groupId + ':' + userId;
+  const cached = CACHE.get(cacheKey);
+  if (cached) {
+    Logger.log('Display name from cache - User ID: ' + userId + ', Display Name: ' + cached);
+    return cached;
+  }
+  
+  // 2. 嘗試從 Sheet 讀取現有的 displayName
+  const sheetName = getGroupMonthSheetName_(groupId, groupName, monthKey);
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  
+  if (sheet && sheet.getLastRow() > 1) {
+    const dataRowCount = sheet.getLastRow() - 1;
+    const userData = sheet.getRange(2, 1, dataRowCount, 2).getValues(); // User ID, Display Name
+    
+    for (var i = 0; i < userData.length; i++) {
+      if (userData[i][0] === userId) {
+        const storedName = userData[i][1];
+        if (storedName) {
+          Logger.log('Display name from sheet - User ID: ' + userId + ', Display Name: ' + storedName);
+          CACHE.put(cacheKey, storedName, 21600); // 快取 6 小時
+          return storedName;
+        }
+        break;
+      }
+    }
+  }
+  
+  // 3. Sheet 裡沒有，才呼叫 API（新使用者）
+  Logger.log('New user detected, fetching display name from API - User ID: ' + userId);
+  return getDisplayName_(groupId, userId);
 }
 
 /**
