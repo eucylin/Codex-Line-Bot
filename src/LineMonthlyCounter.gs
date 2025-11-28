@@ -75,8 +75,11 @@ function doPost(e) {
 
     const timestamp = new Date(event.timestamp);
     const monthKey = Utilities.formatDate(timestamp, TIMEZONE, 'yyyy-MM');
-    const groupName = getGroupName_(groupId);
-    const displayName = getDisplayName_(groupId, userId);
+    
+    // 使用平行化 API 呼叫同時取得 groupName 和 displayName
+    const names = fetchNamesInParallel_(groupId, userId);
+    const groupName = names.groupName;
+    const displayName = names.displayName;
     const monthCommand = extractMonthCommand_(message.text, event.timestamp);
 
     incrementMessageCount_(sheet, monthKey, userId, displayName, {
@@ -176,6 +179,89 @@ function getGroupName_(groupId) {
   const name = data.groupName || groupId;
   CACHE.put(cacheKey, name, 21600); // cache for 6 hours
   return name;
+}
+
+/**
+ * Fetches group name and display name in parallel using UrlFetchApp.fetchAll.
+ * Falls back to cached values or IDs if API calls fail.
+ *
+ * @param {string} groupId LINE group ID.
+ * @param {string} userId LINE user ID.
+ * @return {{groupName: string, displayName: string}}
+ */
+function fetchNamesInParallel_(groupId, userId) {
+  const groupCacheKey = 'groupName:' + groupId;
+  const userCacheKey = groupId + ':' + userId;
+  
+  const cachedGroupName = CACHE.get(groupCacheKey);
+  const cachedDisplayName = CACHE.get(userCacheKey);
+  
+  // If both are cached, return immediately
+  if (cachedGroupName && cachedDisplayName) {
+    Logger.log('Both names from cache - Group: ' + cachedGroupName + ', User: ' + cachedDisplayName);
+    return { groupName: cachedGroupName, displayName: cachedDisplayName };
+  }
+  
+  if (!CHANNEL_ACCESS_TOKEN) {
+    Logger.log('No access token for parallel fetch');
+    return { 
+      groupName: cachedGroupName || groupId, 
+      displayName: cachedDisplayName || userId 
+    };
+  }
+  
+  const requests = [];
+  const requestMap = {}; // Track which request is for what
+  
+  if (!cachedGroupName) {
+    requests.push({
+      url: 'https://api.line.me/v2/bot/group/' + encodeURIComponent(groupId) + '/summary',
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + CHANNEL_ACCESS_TOKEN },
+      muteHttpExceptions: true
+    });
+    requestMap[requests.length - 1] = 'group';
+  }
+  
+  if (!cachedDisplayName) {
+    requests.push({
+      url: 'https://api.line.me/v2/bot/group/' + encodeURIComponent(groupId) + '/member/' + encodeURIComponent(userId),
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + CHANNEL_ACCESS_TOKEN },
+      muteHttpExceptions: true
+    });
+    requestMap[requests.length - 1] = 'user';
+  }
+  
+  let groupName = cachedGroupName || groupId;
+  let displayName = cachedDisplayName || userId;
+  
+  if (requests.length > 0) {
+    const responses = UrlFetchApp.fetchAll(requests);
+    
+    for (var i = 0; i < responses.length; i++) {
+      const response = responses[i];
+      const type = requestMap[i];
+      
+      if (response.getResponseCode() === 200) {
+        const data = JSON.parse(response.getContentText());
+        
+        if (type === 'group') {
+          groupName = data.groupName || groupId;
+          CACHE.put(groupCacheKey, groupName, 21600);
+          Logger.log('Group name fetched in parallel: ' + groupName);
+        } else if (type === 'user') {
+          displayName = data.displayName || userId;
+          CACHE.put(userCacheKey, displayName, 21600);
+          Logger.log('Display name fetched in parallel: ' + displayName);
+        }
+      } else {
+        Logger.log('Parallel fetch failed for ' + type + ': ' + response.getContentText());
+      }
+    }
+  }
+  
+  return { groupName: groupName, displayName: displayName };
 }
 
 /**
@@ -347,8 +433,40 @@ function normalizeHeaderValue_(value) {
 }
 
 /**
- * Increments the message count for a given user and month in the summary sheet.
- * Adds the month column or user row when necessary.
+ * Increments the message count for a given user and month.
+ * Optimized: Only writes to per-group monthly sheet, skips MonthlySummary for better performance.
+ * MonthlySummary can be rebuilt later using rebuildSummaryFromGroupSheets() if needed.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The summary sheet (used to get parent spreadsheet).
+ * @param {string} monthKey Month identifier in yyyy-MM format.
+ * @param {string} userId LINE user ID.
+ * @param {string} displayName User display name.
+ * @param {{groupId: string, groupName: string}=} options Additional options for per-group sheets.
+ */
+function incrementMessageCount_(sheet, monthKey, userId, displayName, options) {
+  // 只寫入 per-group sheet，跳過 MonthlySummary 以提升效能
+  if (options && options.groupId) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    
+    try {
+      incrementGroupMonthlyCount_(
+        sheet.getParent(),
+        options.groupId,
+        options.groupName || options.groupId,
+        monthKey,
+        userId,
+        displayName
+      );
+    } finally {
+      lock.releaseLock();
+    }
+  }
+}
+
+/**
+ * [DEPRECATED] Original function that writes to both MonthlySummary and per-group sheets.
+ * Use this if you need to maintain MonthlySummary data.
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The summary sheet.
  * @param {string} monthKey Month identifier in yyyy-MM format.
@@ -356,7 +474,7 @@ function normalizeHeaderValue_(value) {
  * @param {string} displayName User display name.
  * @param {{groupId: string, groupName: string}=} options Additional options for per-group sheets.
  */
-function incrementMessageCount_(sheet, monthKey, userId, displayName, options) {
+function incrementMessageCountWithSummary_(sheet, monthKey, userId, displayName, options) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
 
@@ -364,7 +482,14 @@ function incrementMessageCount_(sheet, monthKey, userId, displayName, options) {
     ensureSummaryHeader_(sheet);
 
     const lastColumn = sheet.getLastColumn();
-    const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    const lastRow = sheet.getLastRow();
+    
+    // 批次讀取所有資料
+    const allData = lastRow > 1 
+      ? sheet.getRange(1, 1, lastRow, lastColumn).getValues()
+      : [sheet.getRange(1, 1, 1, lastColumn).getValues()[0]];
+    
+    const headers = allData[0];
     const normalizedHeaders = headers.map(normalizeHeaderValue_);
 
     let monthColumnIndex = normalizedHeaders.indexOf(monthKey) + 1;
@@ -375,26 +500,42 @@ function incrementMessageCount_(sheet, monthKey, userId, displayName, options) {
       headerRange.setValue(monthKey);
     }
 
-    const userIds = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
+    // 找使用者 row
     let rowIndex = -1;
-    for (var i = 0; i < userIds.length; i++) {
-      if (userIds[i][0] === userId) {
-        rowIndex = i + 2;
+    let currentDisplayName = '';
+    let currentCount = 0;
+    
+    for (var i = 1; i < allData.length; i++) {
+      if (allData[i][0] === userId) {
+        rowIndex = i + 1;
+        currentDisplayName = allData[i][1];
+        currentCount = (monthColumnIndex <= allData[i].length) 
+          ? Number(allData[i][monthColumnIndex - 1]) || 0 
+          : 0;
         break;
       }
     }
 
     if (rowIndex === -1) {
-      rowIndex = sheet.getLastRow() + 1;
-      sheet.getRange(rowIndex, 1).setValue(userId);
-      sheet.getRange(rowIndex, 2).setValue(displayName);
-    } else if (displayName && sheet.getRange(rowIndex, 2).getValue() !== displayName) {
-      sheet.getRange(rowIndex, 2).setValue(displayName);
+      // 新使用者
+      rowIndex = lastRow + 1;
+      const newRow = [userId, displayName];
+      // 填充到月份欄位
+      while (newRow.length < monthColumnIndex - 1) {
+        newRow.push('');
+      }
+      newRow.push(1);
+      sheet.getRange(rowIndex, 1, 1, newRow.length).setValues([newRow]);
+    } else {
+      // 現有使用者
+      const updates = [];
+      
+      if (displayName && currentDisplayName !== displayName) {
+        sheet.getRange(rowIndex, 2).setValue(displayName);
+      }
+      
+      sheet.getRange(rowIndex, monthColumnIndex).setValue(currentCount + 1);
     }
-
-    const cell = sheet.getRange(rowIndex, monthColumnIndex);
-    const currentValue = Number(cell.getValue()) || 0;
-    cell.setValue(currentValue + 1);
 
     if (options && options.groupId) {
       incrementGroupMonthlyCount_(
@@ -472,11 +613,103 @@ function rebuildSummaryFromLogs() {
   Object.keys(aggregated).forEach(function(userId) {
     const info = aggregated[userId];
     Object.keys(info.counts).forEach(function(month) {
-      incrementMessageCount_(summarySheet, month, userId, info.name);
+      incrementMessageCountWithSummary_(summarySheet, month, userId, info.name);
       const cell = summarySheet.getRange(findRow_(summarySheet, userId), findColumn_(summarySheet, month));
       cell.setValue(info.counts[month]);
     });
   });
+}
+
+/**
+ * Rebuilds the MonthlySummary sheet from all per-group monthly sheets.
+ * Use this function if you need to regenerate the summary after using the
+ * optimized incrementMessageCount_ that skips summary updates.
+ */
+function rebuildSummaryFromGroupSheets() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const summarySheet = getSummarySheet_();
+  summarySheet.clear();
+  summarySheet.appendRow(['User ID', 'Display Name']);
+
+  const sheets = spreadsheet.getSheets();
+  const groupSheetPattern = /-\d{2}-\d{2}$/; // Matches sheets ending with -YY-MM
+
+  const aggregated = {};
+
+  sheets.forEach(function(sheet) {
+    const sheetName = sheet.getName();
+    if (!groupSheetPattern.test(sheetName)) {
+      return;
+    }
+
+    // Extract month from sheet name (last 5 chars are -YY-MM)
+    const suffix = sheetName.slice(-5);
+    const yearSuffix = suffix.substring(0, 2);
+    const monthPart = suffix.substring(3, 5);
+    const monthKey = '20' + yearSuffix + '-' + monthPart;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return;
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    data.forEach(function(row) {
+      const userId = row[0];
+      const displayName = row[1];
+      const count = Number(row[2]) || 0;
+
+      if (!userId) {
+        return;
+      }
+
+      if (!aggregated[userId]) {
+        aggregated[userId] = { displayName: displayName, months: {} };
+      }
+
+      if (!aggregated[userId].months[monthKey]) {
+        aggregated[userId].months[monthKey] = 0;
+      }
+      aggregated[userId].months[monthKey] += count;
+
+      // Update display name to the latest
+      if (displayName) {
+        aggregated[userId].displayName = displayName;
+      }
+    });
+  });
+
+  // Write aggregated data to summary sheet
+  const allMonths = new Set();
+  Object.keys(aggregated).forEach(function(userId) {
+    Object.keys(aggregated[userId].months).forEach(function(month) {
+      allMonths.add(month);
+    });
+  });
+
+  const sortedMonths = Array.from(allMonths).sort();
+
+  // Write header
+  if (sortedMonths.length > 0) {
+    const headerRow = ['User ID', 'Display Name'].concat(sortedMonths);
+    summarySheet.getRange(1, 1, 1, headerRow.length).setValues([headerRow]);
+  }
+
+  // Write data rows
+  const userIds = Object.keys(aggregated);
+  if (userIds.length > 0) {
+    const dataRows = userIds.map(function(userId) {
+      const userData = aggregated[userId];
+      const row = [userId, userData.displayName];
+      sortedMonths.forEach(function(month) {
+        row.push(userData.months[month] || 0);
+      });
+      return row;
+    });
+    summarySheet.getRange(2, 1, dataRows.length, dataRows[0].length).setValues(dataRows);
+  }
+
+  Logger.log('Summary rebuilt from ' + Object.keys(aggregated).length + ' users across ' + sortedMonths.length + ' months.');
 }
 
 function findRow_(sheet, userId) {
@@ -559,6 +792,7 @@ function ensureGroupMonthHeader_(sheet) {
 
 /**
  * Increments the per-group monthly count for a user.
+ * Optimized with batch read to minimize API calls.
  *
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet
  * @param {string} groupId
@@ -571,28 +805,41 @@ function incrementGroupMonthlyCount_(spreadsheet, groupId, groupName, monthKey, 
   const sheet = getGroupMonthSheet_(spreadsheet, groupId, groupName, monthKey);
   const lastRow = sheet.getLastRow();
   const dataRowCount = Math.max(lastRow - 1, 0);
-  const userIds = dataRowCount > 0 ? sheet.getRange(2, 1, dataRowCount, 1).getValues() : [];
+  
+  // 一次讀取所有資料（User ID, Display Name, Count）
+  const allData = dataRowCount > 0 
+    ? sheet.getRange(2, 1, dataRowCount, 3).getValues() 
+    : [];
 
   let rowIndex = -1;
-  for (var i = 0; i < userIds.length; i++) {
-    if (userIds[i][0] === userId) {
+  let currentCount = 0;
+  let currentDisplayName = '';
+  
+  for (var i = 0; i < allData.length; i++) {
+    if (allData[i][0] === userId) {
       rowIndex = i + 2;
+      currentDisplayName = allData[i][1];
+      currentCount = Number(allData[i][2]) || 0;
       break;
     }
   }
 
   if (rowIndex === -1) {
-    rowIndex = sheet.getLastRow() + 1;
-    sheet.getRange(rowIndex, 1).setValue(userId);
-    sheet.getRange(rowIndex, 2).setValue(displayName);
-    sheet.getRange(rowIndex, 3).setValue(0);
-  } else if (displayName && sheet.getRange(rowIndex, 2).getValue() !== displayName) {
-    sheet.getRange(rowIndex, 2).setValue(displayName);
+    // 新使用者：一次寫入整行
+    rowIndex = lastRow + 1;
+    sheet.getRange(rowIndex, 1, 1, 3).setValues([[userId, displayName, 1]]);
+  } else {
+    // 現有使用者：只更新需要更新的欄位
+    const newCount = currentCount + 1;
+    
+    if (displayName && currentDisplayName !== displayName) {
+      // 更新 displayName 和 count
+      sheet.getRange(rowIndex, 2, 1, 2).setValues([[displayName, newCount]]);
+    } else {
+      // 只更新 count
+      sheet.getRange(rowIndex, 3).setValue(newCount);
+    }
   }
-
-  const countCell = sheet.getRange(rowIndex, 3);
-  const currentValue = Number(countCell.getValue()) || 0;
-  countCell.setValue(currentValue + 1);
 }
 
 /**
