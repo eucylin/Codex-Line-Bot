@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>群組發話統計</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 1.8rem;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .subtitle {
+      color: rgba(255,255,255,0.8);
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      color: #333;
+      font-size: 0.9rem;
+    }
+
+    select {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: border-color 0.2s;
+      background: white;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    select:disabled {
+      background-color: #f5f5f5;
+      cursor: not-allowed;
+    }
+
+    .auto-refresh {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #eee;
+    }
+
+    .auto-refresh input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .auto-refresh label {
+      margin: 0;
+      font-weight: normal;
+      color: #666;
+      cursor: pointer;
+    }
+
+    .stats-card {
+      background: white;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    .stats-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .stats-header h2 {
+      font-size: 1.3rem;
+      margin-bottom: 5px;
+    }
+
+    .stats-summary {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-top: 10px;
+    }
+
+    .summary-item {
+      text-align: center;
+    }
+
+    .summary-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .summary-label {
+      font-size: 0.8rem;
+      opacity: 0.8;
+    }
+
+    .ranking-list {
+      padding: 10px 0;
+    }
+
+    .ranking-item {
+      display: flex;
+      align-items: center;
+      padding: 15px 20px;
+      border-bottom: 1px solid #f0f0f0;
+      transition: background 0.2s;
+    }
+
+    .ranking-item:last-child {
+      border-bottom: none;
+    }
+
+    .ranking-item:hover {
+      background: #f8f9fa;
+    }
+
+    .rank {
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-right: 15px;
+    }
+
+    .rank-1 { color: #FFD700; }
+    .rank-2 { color: #C0C0C0; }
+    .rank-3 { color: #CD7F32; }
+    .rank-other { 
+      color: #999;
+      font-size: 1rem;
+    }
+
+    .user-info {
+      flex: 1;
+    }
+
+    .user-id {
+      font-weight: 600;
+      color: #333;
+      font-size: 0.95rem;
+    }
+
+    .message-count {
+      font-weight: 700;
+      color: #667eea;
+      font-size: 1.1rem;
+    }
+
+    .message-label {
+      color: #999;
+      font-size: 0.8rem;
+      margin-left: 5px;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f0f0f0;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error {
+      background: #fee;
+      color: #c00;
+      padding: 15px 20px;
+      border-radius: 10px;
+      margin-top: 20px;
+      text-align: center;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: 10px;
+    }
+
+    .last-updated {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      font-size: 0.8rem;
+      margin-top: 15px;
+    }
+
+    .initial-message {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+    }
+
+    .initial-message .icon {
+      font-size: 3rem;
+      margin-bottom: 10px;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 15px;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+      }
+
+      .controls, .stats-card {
+        border-radius: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 群組發話統計</h1>
+    <p class="subtitle">LINE Bot 發話量即時排行榜</p>
+
+    <div class="controls">
+      <div class="form-group">
+        <label for="groupId">選擇群組</label>
+        <select id="groupId" onchange="onGroupChange()">
+          <option value="">載入中...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="yearMonth">選擇月份</label>
+        <select id="yearMonth" onchange="fetchStats()" disabled>
+          <option value="">請先選擇群組</option>
+        </select>
+      </div>
+      <div class="auto-refresh">
+        <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()" />
+        <label for="autoRefresh">每 30 秒自動更新</label>
+      </div>
+    </div>
+
+    <div id="results">
+      <div class="stats-card">
+        <div class="initial-message">
+          <div class="icon">👆</div>
+          <div>請選擇群組與月份來查看統計</div>
+        </div>
+      </div>
+    </div>
+    <div id="lastUpdated" class="last-updated"></div>
+  </div>
+
+  <script>
+    // Configuration - Update this with your Supabase project URL
+    const SUPABASE_URL = 'https://zycyybbmoxpuzbrlaoqx.supabase.co';
+    const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/get-stats`;
+
+    let autoRefreshInterval = null;
+
+    // Initialize - load groups on page load
+    async function init() {
+      await loadGroups();
+    }
+
+    // Load all groups from database
+    async function loadGroups() {
+      const groupSelect = document.getElementById('groupId');
+      
+      try {
+        const response = await fetch(`${FUNCTION_URL}?action=groups`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || '載入群組失敗');
+        }
+
+        groupSelect.innerHTML = '<option value="">請選擇群組</option>';
+        
+        if (data.groups && data.groups.length > 0) {
+          data.groups.forEach((groupId, index) => {
+            const option = document.createElement('option');
+            option.value = groupId;
+            // Show masked group ID for display
+            option.textContent = `群組 ${index + 1} (${groupId.substring(0, 10)}...)`;
+            groupSelect.appendChild(option);
+          });
+        } else {
+          groupSelect.innerHTML = '<option value="">尚無群組資料</option>';
+        }
+      } catch (error) {
+        groupSelect.innerHTML = `<option value="">載入失敗: ${error.message}</option>`;
+      }
+    }
+
+    // When group is selected, load available months
+    async function onGroupChange() {
+      const groupId = document.getElementById('groupId').value;
+      const monthSelect = document.getElementById('yearMonth');
+      const resultsDiv = document.getElementById('results');
+
+      if (!groupId) {
+        monthSelect.innerHTML = '<option value="">請先選擇群組</option>';
+        monthSelect.disabled = true;
+        resultsDiv.innerHTML = `
+          <div class="stats-card">
+            <div class="initial-message">
+              <div class="icon">👆</div>
+              <div>請選擇群組與月份來查看統計</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      monthSelect.innerHTML = '<option value="">載入中...</option>';
+      monthSelect.disabled = true;
+
+      try {
+        const response = await fetch(`${FUNCTION_URL}?action=months&group_id=${encodeURIComponent(groupId)}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || '載入月份失敗');
+        }
+
+        monthSelect.innerHTML = '';
+        
+        if (data.months && data.months.length > 0) {
+          data.months.forEach((yearMonth) => {
+            const [year, month] = yearMonth.split('-');
+            const option = document.createElement('option');
+            option.value = yearMonth;
+            option.textContent = `${year}年${parseInt(month, 10)}月`;
+            monthSelect.appendChild(option);
+          });
+          monthSelect.disabled = false;
+          
+          // Auto fetch stats for the first month
+          fetchStats();
+        } else {
+          monthSelect.innerHTML = '<option value="">此群組無資料</option>';
+        }
+      } catch (error) {
+        monthSelect.innerHTML = `<option value="">載入失敗: ${error.message}</option>`;
+      }
+    }
+
+    // Fetch stats from API
+    async function fetchStats() {
+      const groupId = document.getElementById('groupId').value;
+      const yearMonth = document.getElementById('yearMonth').value;
+      const resultsDiv = document.getElementById('results');
+
+      if (!groupId || !yearMonth) {
+        return;
+      }
+
+      resultsDiv.innerHTML = `
+        <div class="stats-card">
+          <div class="loading">
+            <div class="spinner"></div>
+            <div>載入中...</div>
+          </div>
+        </div>
+      `;
+
+      try {
+        const url = `${FUNCTION_URL}?group_id=${encodeURIComponent(groupId)}&year_month=${yearMonth}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || '查詢失敗');
+        }
+
+        renderStats(data, yearMonth);
+        updateLastUpdated();
+      } catch (error) {
+        resultsDiv.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+      }
+    }
+
+    // Render stats
+    function renderStats(data, yearMonth) {
+      const resultsDiv = document.getElementById('results');
+      const [year, month] = yearMonth.split('-');
+      const monthDisplay = parseInt(month, 10);
+
+      if (!data.data || data.data.length === 0) {
+        resultsDiv.innerHTML = `
+          <div class="stats-card">
+            <div class="stats-header">
+              <h2>${year}年${monthDisplay}月發話統計</h2>
+            </div>
+            <div class="empty">
+              <div class="empty-icon">📭</div>
+              <div>這個月還沒有任何發話記錄</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const rankingItems = data.data.map((item, index) => {
+        const rank = index + 1;
+        let rankDisplay, rankClass;
+        
+        if (rank === 1) {
+          rankDisplay = '🥇';
+          rankClass = 'rank-1';
+        } else if (rank === 2) {
+          rankDisplay = '🥈';
+          rankClass = 'rank-2';
+        } else if (rank === 3) {
+          rankDisplay = '🥉';
+          rankClass = 'rank-3';
+        } else {
+          rankDisplay = rank;
+          rankClass = 'rank-other';
+        }
+
+        // Mask user ID for privacy
+        const maskedId = item.user_id.substring(0, 10) + '...';
+
+        return `
+          <div class="ranking-item">
+            <div class="rank ${rankClass}">${rankDisplay}</div>
+            <div class="user-info">
+              <div class="user-id">${maskedId}</div>
+            </div>
+            <div>
+              <span class="message-count">${item.count.toLocaleString()}</span>
+              <span class="message-label">則</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      resultsDiv.innerHTML = `
+        <div class="stats-card">
+          <div class="stats-header">
+            <h2>${year}年${monthDisplay}月發話統計</h2>
+            <div class="stats-summary">
+              <div class="summary-item">
+                <div class="summary-value">${data.total_messages.toLocaleString()}</div>
+                <div class="summary-label">總訊息數</div>
+              </div>
+              <div class="summary-item">
+                <div class="summary-value">${data.total_users}</div>
+                <div class="summary-label">活躍人數</div>
+              </div>
+            </div>
+          </div>
+          <div class="ranking-list">
+            ${rankingItems}
+          </div>
+        </div>
+      `;
+    }
+
+    // Update last updated time
+    function updateLastUpdated() {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('zh-TW');
+      document.getElementById('lastUpdated').textContent = `最後更新: ${timeStr}`;
+    }
+
+    // Auto refresh toggle
+    function toggleAutoRefresh() {
+      const checked = document.getElementById('autoRefresh').checked;
+      if (checked) {
+        fetchStats();
+        autoRefreshInterval = setInterval(fetchStats, 30000);
+      } else {
+        if (autoRefreshInterval) {
+          clearInterval(autoRefreshInterval);
+          autoRefreshInterval = null;
+        }
+      }
+    }
+
+    // Initialize on page load
+    init();
+  </script>
+</body>
+</html>

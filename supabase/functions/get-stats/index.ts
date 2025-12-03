@@ -36,17 +36,79 @@ Deno.serve(async (req) => {
     }
 
     const url = new URL(req.url);
+    const action = url.searchParams.get("action");
     const groupId = url.searchParams.get("group_id");
     const yearMonth = url.searchParams.get("year_month");
 
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Action: list all groups
+    if (action === "groups") {
+      const { data, error } = await supabase
+        .from("message_counts")
+        .select("group_id")
+        .order("group_id");
+
+      if (error) {
+        console.error("Database error:", error);
+        return new Response(
+          JSON.stringify({ error: "Database error" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Get unique group IDs
+      const uniqueGroups = [...new Set(data?.map((row) => row.group_id) || [])];
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          groups: uniqueGroups,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Action: list available months for a group
+    if (action === "months") {
+      let query = supabase
+        .from("message_counts")
+        .select("year_month")
+        .order("year_month", { ascending: false });
+
+      if (groupId) {
+        query = query.eq("group_id", groupId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error("Database error:", error);
+        return new Response(
+          JSON.stringify({ error: "Database error" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Get unique months
+      const uniqueMonths = [...new Set(data?.map((row) => row.year_month) || [])];
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          months: uniqueMonths,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Default action: get stats for a group
     if (!groupId) {
       return new Response(
         JSON.stringify({ error: "group_id parameter is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     let query = supabase
       .from("message_counts")
