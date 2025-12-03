@@ -123,6 +123,105 @@ async function getUserProfile(
   return userId.substring(0, 8) + "...";
 }
 
+// Get LINE group summary
+async function getGroupSummary(
+  groupId: string,
+  accessToken: string
+): Promise<string> {
+  try {
+    const response = await fetch(
+      `https://api.line.me/v2/bot/group/${groupId}/summary`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+    if (response.ok) {
+      const summary = await response.json();
+      return summary.groupName || groupId;
+    }
+  } catch (e) {
+    console.error("Error fetching group summary:", e);
+  }
+  return groupId.substring(0, 10) + "...";
+}
+
+// Cache user name in database
+async function cacheUserName(
+  supabase: any,
+  userId: string,
+  userName: string
+): Promise<void> {
+  try {
+    await supabase.rpc("upsert_user_name", {
+      p_user_id: userId,
+      p_user_name: userName,
+    });
+  } catch (e) {
+    console.error("Error caching user name:", e);
+  }
+}
+
+// Cache group name in database
+async function cacheGroupName(
+  supabase: any,
+  groupId: string,
+  groupName: string
+): Promise<void> {
+  try {
+    await supabase.rpc("upsert_group_name", {
+      p_group_id: groupId,
+      p_group_name: groupName,
+    });
+  } catch (e) {
+    console.error("Error caching group name:", e);
+  }
+}
+
+// Get cached user name or fetch from LINE API
+async function getUserNameCached(
+  supabase: any,
+  userId: string,
+  groupId: string,
+  accessToken: string
+): Promise<string> {
+  // Try to get from cache
+  const { data } = await supabase.rpc("get_user_name", {
+    p_user_id: userId,
+  });
+
+  if (data) {
+    return data;
+  }
+
+  // Fetch from LINE API and cache
+  const userName = await getUserProfile(userId, groupId, accessToken);
+  await cacheUserName(supabase, userId, userName);
+  return userName;
+}
+
+// Get cached group name or fetch from LINE API
+async function getGroupNameCached(
+  supabase: any,
+  groupId: string,
+  accessToken: string
+): Promise<string> {
+  // Try to get from cache
+  const { data } = await supabase.rpc("get_group_name", {
+    p_group_id: groupId,
+  });
+
+  if (data) {
+    return data;
+  }
+
+  // Fetch from LINE API and cache
+  const groupName = await getGroupSummary(groupId, accessToken);
+  await cacheGroupName(supabase, groupId, groupName);
+  return groupName;
+}
+
 // Reply to LINE message
 async function replyMessage(
   replyToken: string,
@@ -269,7 +368,9 @@ Deno.serve(async (req) => {
 
           for (let i = 0; i < Math.min(stats.length, 20); i++) {
             const stat = stats[i] as MessageCount;
-            const displayName = await getUserProfile(
+            // Use cached user name
+            const displayName = await getUserNameCached(
+              supabase,
               stat.user_id,
               groupId,
               lineChannelAccessToken
@@ -293,6 +394,10 @@ Deno.serve(async (req) => {
 
         // Always increment message count (except for stats requests to avoid double counting)
         if (!isStatsRequest(messageText, lineBotName)) {
+          // Cache group name and user name when processing message
+          await getGroupNameCached(supabase, groupId, lineChannelAccessToken);
+          await getUserNameCached(supabase, userId, groupId, lineChannelAccessToken);
+
           const { error } = await supabase.rpc("increment_message_count", {
             p_group_id: groupId,
             p_user_id: userId,

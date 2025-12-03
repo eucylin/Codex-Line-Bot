@@ -58,12 +58,29 @@ Deno.serve(async (req) => {
       }
 
       // Get unique group IDs
-      const uniqueGroups = [...new Set(data?.map((row) => row.group_id) || [])];
+      const uniqueGroupIds = [...new Set(data?.map((row) => row.group_id) || [])];
+
+      // Fetch group names from cache
+      const { data: groupNames } = await supabase
+        .from("group_names")
+        .select("group_id, group_name")
+        .in("group_id", uniqueGroupIds);
+
+      // Create a map of group_id -> group_name
+      const groupNameMap = new Map(
+        groupNames?.map((g) => [g.group_id, g.group_name]) || []
+      );
+
+      // Build response with names
+      const groupsWithNames = uniqueGroupIds.map((groupId) => ({
+        group_id: groupId,
+        group_name: groupNameMap.get(groupId) || groupId.substring(0, 10) + "...",
+      }));
 
       return new Response(
         JSON.stringify({
           success: true,
-          groups: uniqueGroups,
+          groups: groupsWithNames,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -130,12 +147,30 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Fetch user names from cache
+    const userIds = data?.map((row: any) => row.user_id) || [];
+    const { data: userNames } = await supabase
+      .from("user_names")
+      .select("user_id, user_name")
+      .in("user_id", userIds);
+
+    // Create a map of user_id -> user_name
+    const userNameMap = new Map(
+      userNames?.map((u: any) => [u.user_id, u.user_name]) || []
+    );
+
+    // Add user names to the data
+    const dataWithNames = data?.map((row: any) => ({
+      ...row,
+      user_name: userNameMap.get(row.user_id) || row.user_id.substring(0, 10) + "...",
+    }));
+
     return new Response(
       JSON.stringify({
         success: true,
-        data: data,
+        data: dataWithNames,
         total_users: data?.length || 0,
-        total_messages: data?.reduce((sum, row) => sum + row.count, 0) || 0,
+        total_messages: data?.reduce((sum: number, row: any) => sum + row.count, 0) || 0,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

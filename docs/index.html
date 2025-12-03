@@ -345,11 +345,10 @@
         groupSelect.innerHTML = '<option value="">請選擇群組</option>';
         
         if (data.groups && data.groups.length > 0) {
-          data.groups.forEach((groupId, index) => {
+          data.groups.forEach((group) => {
             const option = document.createElement('option');
-            option.value = groupId;
-            // Show masked group ID for display
-            option.textContent = `群組 ${index + 1} (${groupId.substring(0, 10)}...)`;
+            option.value = group.group_id;
+            option.textContent = group.group_name;
             groupSelect.appendChild(option);
           });
         } else {
@@ -487,14 +486,14 @@
           rankClass = 'rank-other';
         }
 
-        // Mask user ID for privacy
-        const maskedId = item.user_id.substring(0, 10) + '...';
+        // Use user name from API
+        const displayName = item.user_name || item.user_id.substring(0, 10) + '...';
 
         return `
           <div class="ranking-item">
             <div class="rank ${rankClass}">${rankDisplay}</div>
             <div class="user-info">
-              <div class="user-id">${maskedId}</div>
+              <div class="user-id">${displayName}</div>
             </div>
             <div>
               <span class="message-count">${item.count.toLocaleString()}</span>
