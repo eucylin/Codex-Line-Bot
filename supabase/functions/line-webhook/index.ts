@@ -98,6 +98,34 @@ function isStatsRequest(text: string, botName: string): boolean {
   return parseStatsRequest(text, botName) !== null;
 }
 
+// Check if message mentions the bot (starts with @botname)
+function isBotMentioned(text: string, botName: string): boolean {
+  const escapedBotName = botName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`@${escapedBotName}`, 'i');
+  return pattern.test(text);
+}
+
+// Funny responses when bot is mentioned with unknown command
+// 小清新是一隻黃白相間、可愛的小黃金鼠 🐹
+const funnyResponses = [
+  "窩不知道欸，因為窩只是一隻勞贖 🐹",
+  "嗯...？（歪頭）窩聽不懂人話，只會吃瓜子 🌻",
+  "吱吱！你在叫窩嗎？可是窩在跑滾輪欸 🎡",
+  "（嘴巴塞滿瓜子）...你說什麼？窩沒聽到 🐹",
+  "窩是小清新，不是 ChatGPT 啦！窩只會賣萌 ✨",
+  "這個問題太難了，窩的小腦袋裝不下 🧠💫",
+  "（躲進木屑裡）...窩假裝沒看到這則訊息 👀",
+  "吱？窩剛睡醒，你可以再說一次嗎...算了不用了 😴",
+  "窩是統計發話量的，其他的事情窩真的不會啦 📊",
+  "欸嘿～這個超出窩的能力範圍了，窩只是一隻可愛的勞贖而已 🐹✨",
+];
+
+// Get a random funny response
+function getRandomFunnyResponse(): string {
+  const randomIndex = Math.floor(Math.random() * funnyResponses.length);
+  return funnyResponses[randomIndex];
+}
+
 // Get LINE user profile
 async function getUserProfile(
   userId: string,
@@ -400,6 +428,22 @@ Deno.serve(async (req) => {
           );
 
           console.log(`Sent stats for group ${groupId} for ${targetMonth}`);
+        }
+        // Handle unknown commands when bot is mentioned
+        else if (
+          event.message?.type === "text" &&
+          isBotMentioned(messageText, lineBotName) &&
+          event.replyToken &&
+          lineChannelAccessToken
+        ) {
+          // Bot is mentioned but not a valid command - reply with funny message
+          const funnyReply = getRandomFunnyResponse();
+          await replyMessage(
+            event.replyToken,
+            [{ type: "text", text: funnyReply }],
+            lineChannelAccessToken
+          );
+          console.log(`Sent funny response to unknown command in group ${groupId}`);
         }
 
         // Only count text messages (exclude stickers, images, etc.)
