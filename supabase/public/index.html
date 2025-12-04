@@ -334,6 +334,11 @@
     const SUPABASE_URL = 'https://zycyybbmoxpuzbrlaoqx.supabase.co';
     const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/get-stats`;
 
+    // Rate limiting - prevent excessive API calls
+    const RATE_LIMIT_SECONDS = 5; // Minimum seconds between requests
+    let lastFetchTime = 0;
+    let isLoading = false;
+
     // Initialize - load groups on page load
     async function init() {
       await loadGroups();
@@ -421,14 +426,45 @@
       }
     }
 
-    // Fetch stats from API
+    // Fetch stats from API with rate limiting
     async function fetchStats() {
       const groupId = document.getElementById('groupId').value;
       const yearMonth = document.getElementById('yearMonth').value;
       const resultsDiv = document.getElementById('results');
+      const refreshBtn = document.getElementById('refreshBtn');
 
       if (!groupId || !yearMonth) {
         return;
+      }
+
+      // Rate limiting check
+      const now = Date.now();
+      const timeSinceLastFetch = (now - lastFetchTime) / 1000;
+      
+      if (isLoading) {
+        return; // Already loading, ignore
+      }
+      
+      if (timeSinceLastFetch < RATE_LIMIT_SECONDS && lastFetchTime > 0) {
+        const waitTime = Math.ceil(RATE_LIMIT_SECONDS - timeSinceLastFetch);
+        resultsDiv.innerHTML = `
+          <div class="stats-card">
+            <div class="initial-message">
+              <div class="icon">⏳</div>
+              <div>請等待 ${waitTime} 秒後再試</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      isLoading = true;
+      lastFetchTime = now;
+      
+      // Disable button during loading
+      if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = '載入中...';
       }
 
       resultsDiv.innerHTML = `
@@ -453,6 +489,13 @@
         updateLastUpdated();
       } catch (error) {
         resultsDiv.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+      } finally {
+        isLoading = false;
+        // Re-enable button
+        if (refreshBtn) {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = '🔄 更新';
+        }
       }
     }
 
