@@ -124,7 +124,8 @@ Deno.serve(async (req) => {
     }
 
     // Process each entry
-    const results: { name: string; status: string; count: number }[] = [];
+    const results: { name: string; status: string; count: number; user_id?: string }[] = [];
+    const notFoundNames: string[] = [];
 
     for (const entry of entries) {
       // First, try to find user_id by name from user_names table
@@ -135,24 +136,14 @@ Deno.serve(async (req) => {
         .limit(1)
         .single();
 
-      let userId: string;
-
-      if (userRecord) {
-        userId = userRecord.user_id;
-      } else {
-        // If not found, create a placeholder user_id based on name
-        // This is for cases where we don't have the actual LINE user_id
-        userId = `imported_${entry.name.replace(/\s+/g, "_").toLowerCase()}`;
-        
-        // Also cache this name
-        await supabase
-          .from("user_names")
-          .upsert({
-            user_id: userId,
-            user_name: entry.name,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
+      if (!userRecord) {
+        // User not found - DO NOT create fake ID, just record as not found
+        notFoundNames.push(entry.name);
+        results.push({ name: entry.name, status: "not_found", count: entry.count });
+        continue;
       }
+
+      const userId = userRecord.user_id;
 
       // Upsert the message count
       const { error: upsertError } = await supabase
@@ -166,23 +157,30 @@ Deno.serve(async (req) => {
 
       if (upsertError) {
         console.error(`Error upserting count for ${entry.name}:`, upsertError);
-        results.push({ name: entry.name, status: "error", count: entry.count });
+        results.push({ name: entry.name, status: "error", count: entry.count, user_id: userId });
       } else {
-        results.push({ name: entry.name, status: "success", count: entry.count });
+        results.push({ name: entry.name, status: "success", count: entry.count, user_id: userId });
       }
     }
 
     const successCount = results.filter(r => r.status === "success").length;
+    const notFoundCount = results.filter(r => r.status === "not_found").length;
 
     return new Response(
       JSON.stringify({
-        success: true,
-        message: `Imported ${successCount}/${entries.length} entries`,
+        success: notFoundCount === 0,
+        message: notFoundCount > 0 
+          ? `Imported ${successCount}/${entries.length} entries. ${notFoundCount} users not found in database.`
+          : `Imported ${successCount}/${entries.length} entries`,
         group_id: group_id,
         year_month: year_month,
         mode: mode,
         results: results,
+        not_found_users: notFoundNames.length > 0 ? notFoundNames : undefined,
         parse_errors: errors.length > 0 ? errors : undefined,
+        hint: notFoundNames.length > 0 
+          ? "Users must have sent at least one message in the group before they can be imported. Please check the exact display names in user_names table."
+          : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
