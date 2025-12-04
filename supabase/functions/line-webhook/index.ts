@@ -404,7 +404,7 @@ Deno.serve(async (req) => {
           const statsLines: string[] = [];
           let totalMessages = 0;
 
-          for (let i = 0; i < Math.min(stats.length, 20); i++) {
+          for (let i = 0; i < stats.length; i++) {
             const stat = stats[i] as MessageCount;
             // Use cached user name
             const displayName = await getUserNameCached(
