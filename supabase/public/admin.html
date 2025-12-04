@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理後台 - 發話量匯入</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    .card h2 {
+      color: #333;
+      margin-bottom: 16px;
+      font-size: 1.2rem;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #555;
+      font-weight: 500;
+    }
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: "Menlo", "Monaco", monospace;
+      min-height: 200px;
+      resize: vertical;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .radio-group {
+      display: flex;
+      gap: 20px;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .radio-group input[type="radio"] {
+      width: 18px;
+      height: 18px;
+    }
+    .btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 8px;
+      display: none;
+    }
+    .result.success {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+      display: block;
+    }
+    .result.error {
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+      display: block;
+    }
+    .result pre {
+      margin-top: 10px;
+      padding: 10px;
+      background: rgba(0,0,0,0.05);
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .hint {
+      color: #888;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .format-example {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-family: "Menlo", "Monaco", monospace;
+      font-size: 12px;
+      color: #666;
+    }
+    .format-example strong {
+      color: #333;
+      display: block;
+      margin-bottom: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .back-link {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .back-link a {
+      color: white;
+      text-decoration: none;
+      opacity: 0.8;
+    }
+    .back-link a:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    #loading {
+      display: none;
+      text-align: center;
+      padding: 20px;
+    }
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 管理後台</h1>
+    
+    <div class="card">
+      <h2>🔑 驗證</h2>
+      <div class="form-group">
+        <label for="adminKey">Admin Key</label>
+        <input type="password" id="adminKey" placeholder="請輸入管理員密鑰">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📥 匯入發話量統計</h2>
+      
+      <div class="form-group">
+        <label for="groupId">群組 ID</label>
+        <input type="text" id="groupId" placeholder="Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value="C8e03257f4d4fd101e9c83f69fa9297fe">
+      </div>
+
+      <div class="form-group">
+        <label for="yearMonth">年月 (YYYY-MM)</label>
+        <input type="text" id="yearMonth" placeholder="2025-01" value="">
+        <p class="hint">例如：2025-01、2024-12</p>
+      </div>
+
+      <div class="form-group">
+        <label>匯入模式</label>
+        <div class="radio-group">
+          <label>
+            <input type="radio" name="mode" value="update" checked>
+            更新 (保留現有資料，只更新匹配的使用者)
+          </label>
+          <label>
+            <input type="radio" name="mode" value="replace">
+            取代 (清除該月份所有資料後重新匯入)
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="data">發話量資料</label>
+        <textarea id="data" placeholder="貼上發話量統計資料..."></textarea>
+        <div class="format-example">
+          <strong>📋 支援格式範例：</strong>
+          Loud One: 703<br>
+          Alan Lin: 621<br>
+          Ray Shen: 584<br>
+          小明: 123
+        </div>
+      </div>
+
+      <button class="btn" id="importBtn" onclick="doImport()">
+        📤 開始匯入
+      </button>
+
+      <div id="loading">
+        <div class="spinner"></div>
+        <p style="margin-top: 10px; color: #666;">匯入中，請稍候...</p>
+      </div>
+
+      <div id="result" class="result"></div>
+    </div>
+
+    <div class="back-link">
+      <a href="index.html">← 返回統計頁面</a>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "https://zycyybbmoxpuzbrlaoqx.supabase.co/functions/v1";
+
+    // Auto-fill current year-month
+    document.addEventListener("DOMContentLoaded", () => {
+      const now = new Date();
+      const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      document.getElementById("yearMonth").value = yearMonth;
+    });
+
+    async function doImport() {
+      const adminKey = document.getElementById("adminKey").value.trim();
+      const groupId = document.getElementById("groupId").value.trim();
+      const yearMonth = document.getElementById("yearMonth").value.trim();
+      const data = document.getElementById("data").value.trim();
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+
+      const resultDiv = document.getElementById("result");
+      const loadingDiv = document.getElementById("loading");
+      const importBtn = document.getElementById("importBtn");
+
+      // Validation
+      if (!adminKey) {
+        showResult("error", "請輸入 Admin Key");
+        return;
+      }
+      if (!groupId) {
+        showResult("error", "請輸入群組 ID");
+        return;
+      }
+      if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+        showResult("error", "年月格式錯誤，請使用 YYYY-MM 格式");
+        return;
+      }
+      if (!data) {
+        showResult("error", "請貼上發話量資料");
+        return;
+      }
+
+      // Show loading
+      loadingDiv.style.display = "block";
+      resultDiv.style.display = "none";
+      importBtn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/admin-import`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Key": adminKey,
+          },
+          body: JSON.stringify({
+            group_id: groupId,
+            year_month: yearMonth,
+            mode: mode,
+            data: data,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          let message = `✅ ${result.message}`;
+          if (result.parse_errors && result.parse_errors.length > 0) {
+            message += `\n\n⚠️ 解析錯誤：\n${result.parse_errors.join("\n")}`;
+          }
+          message += `\n\n📋 詳細結果：`;
+          showResult("success", message, result.results);
+        } else {
+          showResult("error", `❌ 匯入失敗：${result.error}`, result);
+        }
+      } catch (error) {
+        showResult("error", `❌ 網路錯誤：${error.message}`);
+      } finally {
+        loadingDiv.style.display = "none";
+        importBtn.disabled = false;
+      }
+    }
+
+    function showResult(type, message, data = null) {
+      const resultDiv = document.getElementById("result");
+      resultDiv.className = `result ${type}`;
+      
+      let html = message.replace(/\n/g, "<br>");
+      if (data) {
+        html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      }
+      
+      resultDiv.innerHTML = html;
+      resultDiv.style.display = "block";
+    }
+  </script>
+</body>
+</html>
