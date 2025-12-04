@@ -330,6 +330,16 @@ Deno.serve(async (req) => {
         const { groupId, userId } = event.source;
         const messageText = event.message?.text || "";
 
+        // Check if this group is in the whitelist
+        const { data: isAllowed } = await supabase.rpc("is_group_allowed", {
+          p_group_id: groupId,
+        });
+
+        if (!isAllowed) {
+          console.log(`Group ${groupId} is not in the whitelist, ignoring message`);
+          continue; // Skip this message, group not allowed
+        }
+
         // Check if this is a stats request (must be @botname X月發話 format)
         const targetMonth = parseStatsRequest(messageText, lineBotName);
         if (
