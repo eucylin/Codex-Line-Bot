@@ -72,10 +72,13 @@ Deno.serve(async (req) => {
       );
 
       // Build response with names
-      const groupsWithNames = uniqueGroupIds.map((groupId) => ({
-        group_id: groupId,
-        group_name: groupNameMap.get(groupId) || groupId.substring(0, 10) + "...",
-      }));
+      const groupsWithNames = uniqueGroupIds.map((groupId) => {
+        let displayId = typeof groupId === "string" ? groupId : String(groupId);
+        return {
+          group_id: displayId,
+          group_name: groupNameMap.get(displayId) || (typeof displayId === "string" ? displayId.substring(0, 10) + "..." : "未知群組"),
+        };
+      });
 
       return new Response(
         JSON.stringify({
