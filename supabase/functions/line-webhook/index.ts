@@ -402,8 +402,9 @@ Deno.serve(async (req) => {
           console.log(`Sent stats for group ${groupId} for ${targetMonth}`);
         }
 
-        // Always increment message count (except for stats requests to avoid double counting)
-        if (!isStatsRequest(messageText, lineBotName)) {
+        // Only count text messages (exclude stickers, images, etc.)
+        // Also exclude stats requests to avoid double counting
+        if (event.message?.type === "text" && !isStatsRequest(messageText, lineBotName)) {
           // Cache group name and user name when processing message
           await getGroupNameCached(supabase, groupId, lineChannelAccessToken);
           await getUserNameCached(supabase, userId, groupId, lineChannelAccessToken);
