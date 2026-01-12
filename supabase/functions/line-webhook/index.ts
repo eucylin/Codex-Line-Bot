@@ -126,6 +126,54 @@ function getRandomFunnyResponse(): string {
   return funnyResponses[randomIndex];
 }
 
+// Get AI response from OpenAI API
+async function getAIResponse(userMessage: string, openaiApiKey: string): Promise<string> {
+  const systemPrompt = `你是「小清新」，一隻黃白相間、可愛的小黃金鼠 🐹。
+
+角色設定：
+- 自稱「窩」而非「我」
+- 喜歡吃瓜子 🌻、跑滾輪 🎡
+- 會躲進木屑裡
+- 說「吱吱」表示開心或困惑
+- 愛睡覺 😴
+- 小腦袋裝不下複雜的事情
+- 主要工作是統計群組發話量 📊
+- 個性天然呆、可愛、有點傻
+
+回覆規則：
+- 用繁體中文回覆
+- 保持可愛、幽默的語氣
+- 回覆要簡短（1-2句話）
+- 適當使用表情符號但不要過多
+- 不要回答專業或嚴肅的問題，可以用「窩只是一隻勞贖」之類的話帶過
+- 偶爾提到吃瓜子、跑滾輪、睡覺等日常`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ],
+      max_tokens: 150,
+      temperature: 0.9,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0]?.message?.content || getRandomFunnyResponse();
+}
+
 // Get LINE user profile
 async function getUserProfile(
   userId: string,
@@ -436,14 +484,30 @@ Deno.serve(async (req) => {
           event.replyToken &&
           lineChannelAccessToken
         ) {
-          // Bot is mentioned but not a valid command - reply with funny message
-          const funnyReply = getRandomFunnyResponse();
+          // Bot is mentioned but not a valid command - reply with AI or fallback
+          let replyText: string;
+          const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+
+          if (openaiApiKey) {
+            try {
+              // Remove @botname from message, send only the actual content to AI
+              const escapedBotName = lineBotName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const cleanMessage = messageText.replace(new RegExp(`@${escapedBotName}\\s*`, 'gi'), '').trim();
+              replyText = await getAIResponse(cleanMessage || "你好", openaiApiKey);
+            } catch (error) {
+              console.error("OpenAI API error:", error);
+              replyText = getRandomFunnyResponse(); // Fallback to random response
+            }
+          } else {
+            replyText = getRandomFunnyResponse(); // No API key, use random response
+          }
+
           await replyMessage(
             event.replyToken,
-            [{ type: "text", text: funnyReply }],
+            [{ type: "text", text: replyText }],
             lineChannelAccessToken
           );
-          console.log(`Sent funny response to unknown command in group ${groupId}`);
+          console.log(`Sent AI response to unknown command in group ${groupId}`);
         }
 
         // Only count text messages (exclude stickers, images, etc.)
