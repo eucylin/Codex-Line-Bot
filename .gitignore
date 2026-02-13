@@ -1,2 +1,12 @@
 # Local Netlify folder
 .netlify
+
+# Claude Code local settings
+.claude/*.local.json
+
+# Environment variables
+.env
+.env.*
+
+# Supabase local
+supabase/.temp/
