@@ -157,7 +157,7 @@ async function getAIResponse(userMessage: string, openaiApiKey: string): Promise
       "Authorization": `Bearer ${openaiApiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "gpt-5-nano",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage }
@@ -176,6 +176,85 @@ async function getAIResponse(userMessage: string, openaiApiKey: string): Promise
 
   const data = await response.json();
   return data.choices[0]?.message?.content || getRandomFunnyResponse();
+}
+
+// Get JST date string with optional day offset
+function getJSTDateString(offsetDays = 0): string {
+  const now = new Date();
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const jstDate = new Date(now.getTime() + jstOffset + offsetDays * 24 * 60 * 60 * 1000);
+  const year = jstDate.getUTCFullYear();
+  const month = String(jstDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(jstDate.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// Get current hour in UTC+8 (Taiwan time)
+function getUTC8Hour(): number {
+  const now = new Date();
+  const utc8Offset = 8 * 60 * 60 * 1000;
+  const utc8Date = new Date(now.getTime() + utc8Offset);
+  return utc8Date.getUTCHours();
+}
+
+// Generate daily summary using OpenAI API
+async function generateDailySummary(
+  messages: { user_name: string; message_text: string }[],
+  openaiApiKey: string
+): Promise<string> {
+  // Build message log from all messages
+  const log = messages.map((msg) => `${msg.user_name}: ${msg.message_text}`).join("\n");
+
+  const systemPrompt = `你是「小清新」，一隻可愛的小黃金鼠 🐹。
+你的任務是根據群組昨天的聊天記錄，產生一份「每日話題精選摘要」。
+
+規則：
+- 自稱「窩」而非「我」
+- 用繁體中文、可愛幽默的口吻
+- 列出 3-5 個昨天最熱門的關鍵字/話題
+- 每個關鍵字搭配一句簡短的摘要描述（說明大家聊了什麼）
+- 開頭用「🌅 昨日話題精選」作為標題
+- 結尾加一句可愛的總結
+- 不要列出使用者名稱
+- 保持簡潔，整體不超過 300 字`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-5-nano",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `以下是昨天的群組聊天記錄：\n\n${log}` },
+      ],
+      max_tokens: 500,
+      temperature: 0.8,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0]?.message?.content || "";
+}
+
+// Promise race with timeout, returns null on timeout
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: number;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Get LINE user profile
@@ -420,6 +499,102 @@ Deno.serve(async (req) => {
           continue; // Skip this message, group not allowed
         }
 
+        // Daily summary: trigger on first normal text message of the day
+        if (
+          event.message?.type === "text" &&
+          !isStatsRequest(messageText, lineBotName) &&
+          !isBotMentioned(messageText, lineBotName) &&
+          event.replyToken &&
+          lineChannelAccessToken
+        ) {
+          const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+          if (openaiApiKey && getUTC8Hour() >= 10) {
+            const todayJST = getJSTDateString(0);
+            const yesterdayJST = getJSTDateString(-1);
+
+            try {
+              const { data: claimed } = await supabase.rpc("try_claim_daily_summary", {
+                p_group_id: groupId,
+                p_summary_date: todayJST,
+              });
+
+              if (claimed) {
+                // Query yesterday's messages for this group
+                const yesterdayStart = `${yesterdayJST}T00:00:00+09:00`;
+                const todayStart = `${todayJST}T00:00:00+09:00`;
+
+                const { data: yesterdayMessages } = await supabase
+                  .from("group_messages")
+                  .select("user_id, message_text")
+                  .eq("group_id", groupId)
+                  .gte("sent_at", yesterdayStart)
+                  .lt("sent_at", todayStart)
+                  .order("sent_at", { ascending: true });
+
+                if (yesterdayMessages && yesterdayMessages.length >= 50) {
+                  // Resolve user names for summary
+                  const userNameMap = new Map<string, string>();
+                  for (const msg of yesterdayMessages) {
+                    if (!userNameMap.has(msg.user_id)) {
+                      const name = await getUserNameCached(
+                        supabase, msg.user_id, groupId, lineChannelAccessToken
+                      );
+                      userNameMap.set(msg.user_id, name);
+                    }
+                  }
+
+                  const messagesWithNames = yesterdayMessages.map((msg: { user_id: string; message_text: string }) => ({
+                    user_name: userNameMap.get(msg.user_id) || msg.user_id,
+                    message_text: msg.message_text,
+                  }));
+
+                  const summary = await withTimeout(
+                    generateDailySummary(messagesWithNames, openaiApiKey),
+                    20000
+                  );
+
+                  if (summary) {
+                    await replyMessage(
+                      event.replyToken,
+                      [{ type: "text", text: summary }],
+                      lineChannelAccessToken
+                    );
+                    // Mark replyToken as used so stats/mention won't reuse it
+                    event.replyToken = undefined;
+
+                    // Update state to sent
+                    await supabase
+                      .from("daily_summary_state")
+                      .update({ status: "sent" })
+                      .eq("group_id", groupId)
+                      .eq("summary_date", todayJST);
+
+                    console.log(`Sent daily summary for group ${groupId} (${yesterdayJST})`);
+                  } else {
+                    // Timeout: release claim so next message can retry
+                    await supabase
+                      .from("daily_summary_state")
+                      .delete()
+                      .eq("group_id", groupId)
+                      .eq("summary_date", todayJST);
+                    console.log(`Daily summary timeout for group ${groupId}, released claim`);
+                  }
+                } else {
+                  // Not enough messages, mark as skipped
+                  await supabase
+                    .from("daily_summary_state")
+                    .update({ status: "skipped" })
+                    .eq("group_id", groupId)
+                    .eq("summary_date", todayJST);
+                  console.log(`Daily summary skipped for group ${groupId}: only ${yesterdayMessages?.length || 0} messages`);
+                }
+              }
+            } catch (e) {
+              console.error("Error in daily summary:", e);
+            }
+          }
+        }
+
         // Check if this is a stats request (must be @botname X月發話 format)
         const targetMonth = parseStatsRequest(messageText, lineBotName);
         if (
@@ -521,19 +696,34 @@ Deno.serve(async (req) => {
           await getGroupNameCached(supabase, groupId, lineChannelAccessToken);
           await getUserNameCached(supabase, userId, groupId, lineChannelAccessToken);
 
-          const { error } = await supabase.rpc("increment_message_count", {
+          const { data: wasCounted, error } = await supabase.rpc("increment_message_count_dedup", {
             p_group_id: groupId,
             p_user_id: userId,
             p_year_month: yearMonth,
+            p_message_id: event.message.id,
           });
 
           if (error) {
             console.error("Error incrementing message count:", error);
-          } else {
+          } else if (wasCounted) {
             processedCount++;
             console.log(
               `Incremented count for user ${userId} in group ${groupId} for ${yearMonth}`
             );
+
+            // Store message for daily summary (non-critical, don't fail webhook)
+            try {
+              await supabase.rpc("store_group_message", {
+                p_group_id: groupId,
+                p_user_id: userId,
+                p_message_text: messageText.substring(0, 500),
+                p_sent_at: new Date(event.timestamp).toISOString(),
+              });
+            } catch (e) {
+              console.error("Error storing group message for summary:", e);
+            }
+          } else {
+            console.log(`Duplicate message ${event.message.id} skipped`);
           }
         }
       }
