@@ -126,8 +126,50 @@ function getRandomFunnyResponse(): string {
   return funnyResponses[randomIndex];
 }
 
+// Fetch knowledge base entries and format as context string
+const MAX_KNOWLEDGE_CHARS = 3000;
+
+async function fetchKnowledgeContext(supabase: any): Promise<string> {
+  const { data, error } = await supabase
+    .from("knowledge_base")
+    .select("title, content, category")
+    .eq("enabled", true)
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (error || !data || data.length === 0) {
+    return "";
+  }
+
+  // Build formatted blocks, trim from end if over limit
+  const blocks: { text: string; len: number }[] = [];
+  for (const entry of data) {
+    const header = entry.category
+      ? `### ${entry.title} [${entry.category}]`
+      : `### ${entry.title}`;
+    const block = `${header}\n${entry.content}`;
+    blocks.push({ text: block, len: block.length });
+  }
+
+  // Trim from the end if total exceeds limit
+  let totalLen = blocks.reduce((sum, b) => sum + b.len + 1, 0);
+  while (totalLen > MAX_KNOWLEDGE_CHARS && blocks.length > 0) {
+    const removed = blocks.pop()!;
+    totalLen -= removed.len + 1;
+  }
+
+  if (blocks.length === 0) return "";
+
+  return blocks.map((b) => b.text).join("\n\n");
+}
+
 // Get AI response from OpenAI API
-async function getAIResponse(userMessage: string, openaiApiKey: string): Promise<string> {
+async function getAIResponse(userMessage: string, openaiApiKey: string, knowledgeContext = ""): Promise<string> {
+  let knowledgeSection = "";
+  if (knowledgeContext) {
+    knowledgeSection = `\n\n參考知識（如果使用者的問題相關，用你的口吻自然地融入回答中；如果無關，就忽略這些內容照常回答）：\n${knowledgeContext}\n`;
+  }
+
   const systemPrompt = `你是「小清新」，一隻黃白相間、可愛的小黃金鼠 🐹。
 
 角色設定：
@@ -139,7 +181,7 @@ async function getAIResponse(userMessage: string, openaiApiKey: string): Promise
 - 年齡：現在 3 個月大，正值青春期！是個小男生
 - 說話偶爾會有些錯別字，像個中文還沒完全學好的小孩子一般
 - 懂得給予人類情緒價值，會用可愛的方式給予人類正能量
-
+${knowledgeSection}
 回覆規則：
 - 用繁體中文回覆
 - 保持可愛、幽默的語氣
@@ -669,10 +711,18 @@ Deno.serve(async (req) => {
 
           if (openaiApiKey) {
             try {
+              // Fetch knowledge context (non-blocking on failure)
+              let knowledgeContext = "";
+              try {
+                knowledgeContext = await fetchKnowledgeContext(supabase);
+              } catch (e) {
+                console.error("Error fetching knowledge context:", e);
+              }
+
               // Remove @botname from message, send only the actual content to AI
               const escapedBotName = lineBotName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
               const cleanMessage = messageText.replace(new RegExp(`@${escapedBotName}\\s*`, 'gi'), '').trim();
-              replyText = await getAIResponse(cleanMessage || "你好", openaiApiKey);
+              replyText = await getAIResponse(cleanMessage || "你好", openaiApiKey, knowledgeContext);
             } catch (error) {
               console.error("OpenAI API error:", error);
               replyText = getRandomFunnyResponse(); // Fallback to random response

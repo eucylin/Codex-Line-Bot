@@ -392,6 +392,12 @@ entrypoint = "./functions/line-webhook/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/line-webhook/*.html" ]
 
+[functions.admin-knowledge]
+enabled = true
+verify_jwt = false
+import_map = "./functions/admin-knowledge/deno.json"
+entrypoint = "./functions/admin-knowledge/index.ts"
+
 [functions.get-stats]
 enabled = true
 verify_jwt = true

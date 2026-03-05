@@ -32,7 +32,10 @@ Codex-Line-Bot/
 │   │   ├── get-stats/        # GET - Stats query API
 │   │   │   ├── index.ts
 │   │   │   └── deno.json
-│   │   └── admin-import/     # POST - Batch import API
+│   │   ├── admin-import/     # POST - Batch import API
+│   │   │   ├── index.ts
+│   │   │   └── deno.json
+│   │   └── admin-knowledge/  # GET/POST/PUT/DELETE - Knowledge base CRUD API
 │   │       ├── index.ts
 │   │       └── deno.json
 │   ├── migrations/           # SQL migrations (ordered by timestamp)
@@ -42,10 +45,12 @@ Codex-Line-Bot/
 │   │   ├── 20260304000000_add_event_dedup.sql
 │   │   ├── 20260304100000_enable_rls_on_remaining_tables.sql
 │   │   ├── 20260304200000_set_function_search_path.sql
-│   │   └── 20260305000000_add_daily_summary.sql
+│   │   ├── 20260305000000_add_daily_summary.sql
+│   │   └── 20260306000000_add_knowledge_base.sql
 │   └── public/               # Static frontend (served by Netlify)
 │       ├── index.html        # Stats dashboard
 │       ├── admin.html        # Admin import panel
+│       ├── knowledge.html    # Knowledge base management panel
 │       └── docs/index.html   # API docs page
 ```
 
@@ -57,7 +62,7 @@ LINE Group Message → LINE Messaging API
         → Check group whitelist (allowed_groups table)
         → Daily summary: on first text msg after UTC+8 10:00, generate yesterday's summary via AI
         → If "@小清新 X月發話": query stats, reply with ranking
-        → If "@小清新 <other>": call OpenAI API (or fallback to hardcoded responses)
+        → If "@小清新 <other>": fetch knowledge_base → inject into system prompt → call OpenAI API (or fallback to hardcoded responses)
         → Count text messages: increment_message_count_dedup RPC (dedup by message_id)
         → Store text messages: store_group_message RPC (for daily summary, retained 60 days)
         → Cache group/user names lazily
@@ -68,6 +73,10 @@ Frontend Dashboard → GET /functions/v1/get-stats
 Admin Panel → POST /functions/v1/admin-import
     → X-Admin-Key header auth
     → Parse "Name: count" format, lookup user_id by name, upsert
+
+Knowledge Admin → GET/POST/PUT/DELETE /functions/v1/admin-knowledge
+    → X-Admin-Key header auth
+    → CRUD operations on knowledge_base table
 ```
 
 ## Database Schema
@@ -80,6 +89,7 @@ Admin Panel → POST /functions/v1/admin-import
 - **processed_events** — Dedup table for LINE message IDs (auto-cleanup after 24h)
 - **group_messages** — Stores text messages for daily summary (retained 60 days)
 - **daily_summary_state** — Tracks daily summary generation state per group (retained 90 days)
+- **knowledge_base** — Knowledge entries injected into AI system prompt for context-aware responses (context stuffing)
 
 ### Key RPC Functions (called via `supabase.rpc()`)
 - `increment_message_count_dedup(p_group_id, p_user_id, p_year_month, p_message_id)` — Atomic dedup + upsert +1
@@ -104,7 +114,7 @@ Admin Panel → POST /functions/v1/admin-import
 | `LINE_CHANNEL_ACCESS_TOKEN` | line-webhook | Reply messages & fetch profiles |
 | `LINE_BOT_NAME` | line-webhook | Bot mention pattern (default: "Bot") |
 | `OPENAI_API_KEY` | line-webhook | AI responses & daily summary (optional, fallback to hardcoded) |
-| `ADMIN_SECRET_KEY` | admin-import | Admin API authentication |
+| `ADMIN_SECRET_KEY` | admin-import, admin-knowledge | Admin API authentication |
 | `SUPABASE_URL` | all functions | Auto-provided by Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | all functions | Auto-provided by Supabase |
 
@@ -173,10 +183,12 @@ supabase db reset
 - `line-webhook` has JWT verification **disabled** (`"verify_jwt": false` in deno.json) since LINE sends unauthenticated webhooks; security is via HMAC-SHA256 signature instead
 - `get-stats` has JWT verification **enabled** (requires Authorization header)
 - `admin-import` has JWT verification **disabled** but requires `X-Admin-Key` header
+- `admin-knowledge` has JWT verification **disabled** but requires `X-Admin-Key` header
 - Stats requests (`@botname X月發話`) are **not** counted as messages
 - Only **text** messages are counted (stickers, images, etc. are ignored)
 - Message counting uses **dedup** (`increment_message_count_dedup`) to handle LINE webhook retries
 - Text messages are stored in `group_messages` for daily summary (first 500 chars per message)
 - Daily summary triggers on the **first text message after UTC+8 10:00** each day, using atomic claim to prevent duplicates; requires at least 50 messages from yesterday
 - The `_shared/` modules exist but are currently **not imported** by the functions — types and CORS are defined inline in each function
+- Knowledge base uses **context stuffing**: all enabled entries are fetched and injected into the AI system prompt on each bot mention; max 3000 chars, trimmed from end by sort_order
 - Frontend language: Traditional Chinese (zh-TW)
