@@ -269,6 +269,60 @@
       margin-top: 15px;
     }
 
+    .admin-fab {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.4);
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+      z-index: 100;
+    }
+
+    .admin-fab:hover {
+      background: rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.8);
+    }
+
+    .admin-menu {
+      position: fixed;
+      bottom: 56px;
+      right: 16px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      padding: 6px 0;
+      display: none;
+      z-index: 100;
+      min-width: 160px;
+    }
+
+    .admin-menu.open {
+      display: block;
+    }
+
+    .admin-menu a {
+      display: block;
+      padding: 10px 16px;
+      color: #333;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: background 0.15s;
+    }
+
+    .admin-menu a:hover {
+      background: #f0f0f0;
+    }
+
     .initial-message {
       text-align: center;
       padding: 40px 20px;
@@ -328,6 +382,13 @@
     </div>
     <div id="lastUpdated" class="last-updated"></div>
   </div>
+
+  <div class="admin-menu" id="adminMenu">
+    <a href="/admin.html">批次匯入</a>
+    <a href="/knowledge.html">知識庫管理</a>
+    <a href="/docs/">API 文件</a>
+  </div>
+  <button class="admin-fab" id="adminFab" onclick="document.getElementById('adminMenu').classList.toggle('open')" title="管理選單">&#9881;</button>
 
   <script>
     // Configuration - Update this with your Supabase project URL
@@ -583,6 +644,15 @@
       const timeStr = now.toLocaleTimeString('zh-TW');
       document.getElementById('lastUpdated').textContent = `最後更新: ${timeStr}`;
     }
+
+    // Close admin menu when clicking outside
+    document.addEventListener('click', function(e) {
+      const menu = document.getElementById('adminMenu');
+      const fab = document.getElementById('adminFab');
+      if (!menu.contains(e.target) && e.target !== fab) {
+        menu.classList.remove('open');
+      }
+    });
 
     // Initialize on page load
     init();
