@@ -11,7 +11,7 @@ LINE Bot that tracks group message counts per user per month, with a cute AI ham
 - **Database:** PostgreSQL 17 (Supabase)
 - **Frontend:** Static HTML/CSS/JS (no frameworks)
 - **Hosting:** Supabase (backend) + Netlify (frontend static files)
-- **External APIs:** LINE Messaging API, OpenAI API (gpt-4o-mini)
+- **External APIs:** LINE Messaging API, OpenAI API (gpt-5-nano)
 - **Import style:** JSR imports (`jsr:@supabase/supabase-js@2`, `jsr:@std/crypto`)
 
 ## Project Structure
@@ -38,7 +38,11 @@ Codex-Line-Bot/
 │   ├── migrations/           # SQL migrations (ordered by timestamp)
 │   │   ├── 20231203000000_create_message_counts.sql
 │   │   ├── 20231204000000_add_name_cache.sql
-│   │   └── 20231205000000_add_allowed_groups.sql
+│   │   ├── 20231205000000_add_allowed_groups.sql
+│   │   ├── 20260304000000_add_event_dedup.sql
+│   │   ├── 20260304100000_enable_rls_on_remaining_tables.sql
+│   │   ├── 20260304200000_set_function_search_path.sql
+│   │   └── 20260305000000_add_daily_summary.sql
 │   └── public/               # Static frontend (served by Netlify)
 │       ├── index.html        # Stats dashboard
 │       ├── admin.html        # Admin import panel
@@ -51,9 +55,11 @@ Codex-Line-Bot/
 LINE Group Message → LINE Messaging API
     → POST /functions/v1/line-webhook (HMAC-SHA256 verified)
         → Check group whitelist (allowed_groups table)
+        → Daily summary: on first text msg after UTC+8 10:00, generate yesterday's summary via AI
         → If "@小清新 X月發話": query stats, reply with ranking
         → If "@小清新 <other>": call OpenAI API (or fallback to hardcoded responses)
-        → Count text messages: increment_message_count RPC
+        → Count text messages: increment_message_count_dedup RPC (dedup by message_id)
+        → Store text messages: store_group_message RPC (for daily summary, retained 60 days)
         → Cache group/user names lazily
 
 Frontend Dashboard → GET /functions/v1/get-stats
@@ -71,15 +77,23 @@ Admin Panel → POST /functions/v1/admin-import
 - **group_names** — Cache of LINE group names (14-day expiry)
 - **user_names** — Cache of LINE user display names (7-day expiry)
 - **allowed_groups** — Whitelist of group IDs that can use the bot
+- **processed_events** — Dedup table for LINE message IDs (auto-cleanup after 24h)
+- **group_messages** — Stores text messages for daily summary (retained 60 days)
+- **daily_summary_state** — Tracks daily summary generation state per group (retained 90 days)
 
 ### Key RPC Functions (called via `supabase.rpc()`)
-- `increment_message_count(p_group_id, p_user_id, p_year_month)` — Upsert +1
+- `increment_message_count_dedup(p_group_id, p_user_id, p_year_month, p_message_id)` — Atomic dedup + upsert +1
+- `increment_message_count(p_group_id, p_user_id, p_year_month)` — Legacy upsert +1 (still exists)
 - `get_group_name(p_group_id)` / `get_user_name(p_user_id)` — Return cached name or NULL if expired
 - `upsert_group_name(p_group_id, p_group_name)` / `upsert_user_name(p_user_id, p_user_name)`
 - `is_group_allowed(p_group_id)` — Boolean whitelist check
+- `store_group_message(p_group_id, p_user_id, p_message_text, p_sent_at)` — Store message + probabilistic cleanup
+- `try_claim_daily_summary(p_group_id, p_summary_date)` — Atomic claim to prevent duplicate summaries
+- `cleanup_processed_events(p_older_than_hours)` — Manual dedup table cleanup utility
 
 ### Security
-- RLS enabled on all tables; only `service_role` has access
+- RLS enabled on **all** tables; only `service_role` has access
+- All DB functions have explicit `search_path = public` set
 - Edge functions use `SUPABASE_SERVICE_ROLE_KEY` (not anon key)
 
 ## Environment Variables
@@ -89,7 +103,7 @@ Admin Panel → POST /functions/v1/admin-import
 | `LINE_CHANNEL_SECRET` | line-webhook | HMAC-SHA256 signature verification |
 | `LINE_CHANNEL_ACCESS_TOKEN` | line-webhook | Reply messages & fetch profiles |
 | `LINE_BOT_NAME` | line-webhook | Bot mention pattern (default: "Bot") |
-| `OPENAI_API_KEY` | line-webhook | AI responses (optional, fallback to hardcoded) |
+| `OPENAI_API_KEY` | line-webhook | AI responses & daily summary (optional, fallback to hardcoded) |
 | `ADMIN_SECRET_KEY` | admin-import | Admin API authentication |
 | `SUPABASE_URL` | all functions | Auto-provided by Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | all functions | Auto-provided by Supabase |
@@ -113,7 +127,7 @@ Admin Panel → POST /functions/v1/admin-import
 - Error handling: try/catch at top level, `console.error` for logging
 - Supabase client created per-request: `createClient(url, serviceKey)`
 - Types defined locally in each function file (not importing from _shared/types.ts)
-- Timezone: Asia/Tokyo (UTC+9) for year_month calculation
+- Timezone: Asia/Tokyo (UTC+9) for year_month calculation; UTC+8 for daily summary trigger hour
 
 ### Response Format
 - All API responses: `{ success, data/error, message? }`
@@ -128,7 +142,7 @@ The bot has a character persona used in OpenAI API calls:
 - Occasionally says "吱吱" (squeaking)
 - Naive, funny, gives emotional support
 - Uses Traditional Chinese with occasional typos/注音文
-- Model: `gpt-4o-mini`, temperature: 0.9, max_tokens: 230
+- Model: `gpt-5-nano`, temperature: 0.9, max_tokens: 230
 
 ## Development
 
@@ -161,5 +175,8 @@ supabase db reset
 - `admin-import` has JWT verification **disabled** but requires `X-Admin-Key` header
 - Stats requests (`@botname X月發話`) are **not** counted as messages
 - Only **text** messages are counted (stickers, images, etc. are ignored)
+- Message counting uses **dedup** (`increment_message_count_dedup`) to handle LINE webhook retries
+- Text messages are stored in `group_messages` for daily summary (first 500 chars per message)
+- Daily summary triggers on the **first text message after UTC+8 10:00** each day, using atomic claim to prevent duplicates; requires at least 50 messages from yesterday
 - The `_shared/` modules exist but are currently **not imported** by the functions — types and CORS are defined inline in each function
 - Frontend language: Traditional Chinese (zh-TW)
