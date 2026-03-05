@@ -204,7 +204,7 @@ ${knowledgeSection}
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage }
       ],
-      max_tokens: 230,
+      max_completion_tokens: 230,
       temperature: 0.9,
       frequency_penalty: 0.6,
       presence_penalty: 0.2,
@@ -272,7 +272,7 @@ async function generateDailySummary(
         { role: "system", content: systemPrompt },
         { role: "user", content: `以下是昨天的群組聊天記錄：\n\n${log}` },
       ],
-      max_tokens: 500,
+      max_completion_tokens: 500,
       temperature: 0.8,
     }),
   });
