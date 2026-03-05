@@ -184,7 +184,7 @@ supabase db reset
 - `get-stats` has JWT verification **enabled** (requires Authorization header)
 - `admin-import` has JWT verification **disabled** but requires `X-Admin-Key` header
 - `admin-knowledge` has JWT verification **disabled** but requires `X-Admin-Key` header
-- Stats requests (`@botname X月發話`) are **not** counted as messages
+- Stats requests (`@botname X月發話`) **are** counted as messages (same as all text messages)
 - Only **text** messages are counted (stickers, images, etc. are ignored)
 - Message counting uses **dedup** (`increment_message_count_dedup`) to handle LINE webhook retries
 - Text messages are stored in `group_messages` for daily summary (first 500 chars per message)
