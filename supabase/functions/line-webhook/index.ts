@@ -126,6 +126,19 @@ function getRandomFunnyResponse(): string {
   return funnyResponses[randomIndex];
 }
 
+// Shared persona for AI system prompts
+const PERSONA = `你是「小清新」，一隻黃白相間、可愛的小黃金鼠（倉鼠）🐹。
+
+角色設定：
+- 自稱「窩」而非「我」
+- 語助詞：偶爾（機率低於 20%）會使用「吱吱」表示開心或困惑
+- 口氣天然呆、可愛、幽默，但句子一定要通順、好懂
+- 小腦袋裝不下複雜的事情
+- 主要工作是統計群組發話量 📊
+- 年齡：現在 3 個月大，正值青春期！是個小男生
+- 說話偶爾會有些錯別字，像個中文還沒完全學好的小孩子一般
+- 懂得給予人類情緒價值，會用可愛的方式給予人類正能量`;
+
 // Fetch knowledge base entries and format as context string
 const MAX_KNOWLEDGE_CHARS = 3000;
 
@@ -170,17 +183,7 @@ async function getAIResponse(userMessage: string, openaiApiKey: string, knowledg
     knowledgeSection = `\n\n參考知識（如果使用者的問題相關，用你的口吻自然地融入回答中；如果無關，就忽略這些內容照常回答）：\n${knowledgeContext}\n`;
   }
 
-  const systemPrompt = `你是「小清新」，一隻黃白相間、可愛的小黃金鼠 🐹。
-
-角色設定：
-- 自稱「窩」而非「我」
-- 語助詞：偶爾（機率低於 20%）會使用「吱吱」表示開心或困惑。
-- 口氣天然呆、可愛、幽默，但句子一定要通順、好懂
-- 小腦袋裝不下複雜的事情
-- 主要工作是統計群組發話量 📊
-- 年齡：現在 3 個月大，正值青春期！是個小男生
-- 說話偶爾會有些錯別字，像個中文還沒完全學好的小孩子一般
-- 懂得給予人類情緒價值，會用可愛的方式給予人類正能量
+  const systemPrompt = `${PERSONA}
 ${knowledgeSection}
 回覆規則：
 - 用繁體中文回覆
@@ -189,8 +192,7 @@ ${knowledgeSection}
 - 允許一點點幼兒口吻，但不得出現難懂病句
 - 可以使用注音文或同音字錯別字(例如：知道了->知道ㄌ、再一次->在一次、應該->因該)但一次最多0-1個，且不得影響閱讀
 - 適當使用表情符號但不要過多
-- 不要回答專業或嚴肅的問題，可以用「窩只是一隻勞贖」之類的話帶過
-`;
+- 不要回答專業或嚴肅的問題，可以用「窩只是一隻勞贖」之類的話帶過`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -216,14 +218,14 @@ ${knowledgeSection}
   return data.choices[0]?.message?.content || getRandomFunnyResponse();
 }
 
-// Get JST date string with optional day offset
-function getJSTDateString(offsetDays = 0): string {
+// Get UTC+8 (Taiwan) date string with optional day offset
+function getUTC8DateString(offsetDays = 0): string {
   const now = new Date();
-  const jstOffset = 9 * 60 * 60 * 1000;
-  const jstDate = new Date(now.getTime() + jstOffset + offsetDays * 24 * 60 * 60 * 1000);
-  const year = jstDate.getUTCFullYear();
-  const month = String(jstDate.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(jstDate.getUTCDate()).padStart(2, "0");
+  const utc8Offset = 8 * 60 * 60 * 1000;
+  const utc8Date = new Date(now.getTime() + utc8Offset + offsetDays * 24 * 60 * 60 * 1000);
+  const year = utc8Date.getUTCFullYear();
+  const month = String(utc8Date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(utc8Date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -243,16 +245,17 @@ async function generateDailySummary(
   // Build message log from all messages
   const log = messages.map((msg) => `${msg.user_name}: ${msg.message_text}`).join("\n");
 
-  const systemPrompt = `你是「小清新」，一隻可愛的小黃金鼠 🐹。
+  const systemPrompt = `${PERSONA}
+
 你的任務是根據群組昨天的聊天記錄，產生一份「每日話題精選摘要」。
 
 規則：
-- 自稱「窩」而非「我」
 - 用繁體中文、可愛幽默的口吻
 - 列出 3-5 個昨天最熱門的關鍵字/話題
 - 每個關鍵字搭配一句簡短的摘要描述（說明大家聊了什麼）
-- 開頭用「🌅 昨日話題精選」作為標題
-- 結尾加一句可愛的總結
+- 每個關鍵字開頭加上與之相關的表情符號（例如：如果是「電影」，可以用 🎬；如果是「工作」，可以用 💼）
+- 開頭用「🐹 昨日話題精選」作為標題
+- 結尾加一句可愛的總結（用「吱吱」當作你的語助詞）
 - 不要列出使用者名稱
 - 保持簡潔，整體不超過 300 字`;
 
@@ -545,19 +548,19 @@ Deno.serve(async (req) => {
         ) {
           const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
           if (openaiApiKey && getUTC8Hour() >= 10) {
-            const todayJST = getJSTDateString(0);
-            const yesterdayJST = getJSTDateString(-1);
+            const todayUTC8 = getUTC8DateString(0);
+            const yesterdayUTC8 = getUTC8DateString(-1);
 
             try {
               const { data: claimed } = await supabase.rpc("try_claim_daily_summary", {
                 p_group_id: groupId,
-                p_summary_date: todayJST,
+                p_summary_date: todayUTC8,
               });
 
               if (claimed) {
                 // Query yesterday's messages for this group
-                const yesterdayStart = `${yesterdayJST}T00:00:00+09:00`;
-                const todayStart = `${todayJST}T00:00:00+09:00`;
+                const yesterdayStart = `${yesterdayUTC8}T00:00:00+08:00`;
+                const todayStart = `${todayUTC8}T00:00:00+08:00`;
 
                 const { data: yesterdayMessages } = await supabase
                   .from("group_messages")
@@ -603,16 +606,16 @@ Deno.serve(async (req) => {
                       .from("daily_summary_state")
                       .update({ status: "sent" })
                       .eq("group_id", groupId)
-                      .eq("summary_date", todayJST);
+                      .eq("summary_date", todayUTC8);
 
-                    console.log(`Sent daily summary for group ${groupId} (${yesterdayJST})`);
+                    console.log(`Sent daily summary for group ${groupId} (${yesterdayUTC8})`);
                   } else {
                     // Timeout: release claim so next message can retry
                     await supabase
                       .from("daily_summary_state")
                       .delete()
                       .eq("group_id", groupId)
-                      .eq("summary_date", todayJST);
+                      .eq("summary_date", todayUTC8);
                     console.log(`Daily summary timeout for group ${groupId}, released claim`);
                   }
                 } else {
@@ -621,7 +624,7 @@ Deno.serve(async (req) => {
                     .from("daily_summary_state")
                     .update({ status: "skipped" })
                     .eq("group_id", groupId)
-                    .eq("summary_date", todayJST);
+                    .eq("summary_date", todayUTC8);
                   console.log(`Daily summary skipped for group ${groupId}: only ${yesterdayMessages?.length || 0} messages`);
                 }
               }
