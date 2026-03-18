@@ -589,7 +589,7 @@ Deno.serve(async (req) => {
 
                   const summary = await withTimeout(
                     generateDailySummary(messagesWithNames, openaiApiKey),
-                    20000
+                    50000
                   );
 
                   if (summary) {
