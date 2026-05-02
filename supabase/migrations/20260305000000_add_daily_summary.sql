@@ -26,7 +26,7 @@ COMMENT ON TABLE group_messages IS 'Stores group chat messages for daily summary
 -- Table to track daily summary claim state per group
 CREATE TABLE daily_summary_state (
   group_id TEXT NOT NULL,
-  summary_date TEXT NOT NULL,  -- YYYY-MM-DD (JST)
+  summary_date TEXT NOT NULL,  -- YYYY-MM-DD (UTC+8, Asia/Taipei)
   status TEXT NOT NULL DEFAULT 'claimed',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (group_id, summary_date)

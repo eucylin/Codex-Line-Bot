@@ -61,14 +61,13 @@ async function verifySignature(
   return signature === expectedSignature;
 }
 
-// Get current year-month in YYYY-MM format (Asia/Tokyo timezone)
+// Get current year-month in YYYY-MM format (Asia/Taipei timezone, UTC+8)
 function getCurrentYearMonth(): string {
   const now = new Date();
-  // Convert to JST (UTC+9)
-  const jstOffset = 9 * 60 * 60 * 1000;
-  const jstDate = new Date(now.getTime() + jstOffset);
-  const year = jstDate.getUTCFullYear();
-  const month = String(jstDate.getUTCMonth() + 1).padStart(2, "0");
+  const utc8Offset = 8 * 60 * 60 * 1000;
+  const utc8Date = new Date(now.getTime() + utc8Offset);
+  const year = utc8Date.getUTCFullYear();
+  const month = String(utc8Date.getUTCMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
 }
 
@@ -84,9 +83,9 @@ function parseStatsRequest(text: string, botName: string): string | null {
     const month = parseInt(match[1], 10);
     if (month >= 1 && month <= 12) {
       const now = new Date();
-      const jstOffset = 9 * 60 * 60 * 1000;
-      const jstDate = new Date(now.getTime() + jstOffset);
-      const year = jstDate.getUTCFullYear();
+      const utc8Offset = 8 * 60 * 60 * 1000;
+      const utc8Date = new Date(now.getTime() + utc8Offset);
+      const year = utc8Date.getUTCFullYear();
       return `${year}-${String(month).padStart(2, "0")}`;
     }
   }

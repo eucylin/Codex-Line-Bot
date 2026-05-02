@@ -137,7 +137,7 @@ Knowledge Admin → GET/POST/PUT/DELETE /functions/v1/admin-knowledge
 - Error handling: try/catch at top level, `console.error` for logging
 - Supabase client created per-request: `createClient(url, serviceKey)`
 - Types defined locally in each function file (not importing from _shared/types.ts)
-- Timezone: Asia/Tokyo (UTC+9) for year_month calculation; UTC+8 for daily summary trigger hour
+- Timezone: Asia/Taipei (UTC+8) for both year_month calculation and daily summary trigger hour
 
 ### Response Format
 - All API responses: `{ success, data/error, message? }`
